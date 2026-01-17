@@ -34,7 +34,7 @@ if st.session_state.user is None:
             nu = st.text_input("Scegli Username").upper()
             np = st.text_input("Password", type="password")
             npart = st.selectbox("Tua Partita", PARTITE[:-1])
-            if st.form_submit_button("Crea Account"):
+            st.form_submit_button("Crea Account"):
 try:
     users = conn.read(worksheet="utenti", ttl=0)
 except Exception as e:
