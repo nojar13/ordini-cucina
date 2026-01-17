@@ -4,109 +4,114 @@ import pandas as pd
 from datetime import datetime
 
 # --- CONFIGURAZIONE ---
-st.set_page_config(page_title="Ordini Interni Chef", layout="wide")
+st.set_page_config(page_title="Sistema Ordini Cucina", layout="wide")
 
-PARTITE = ["ANTIPASTI", "PRIMI", "SECONDI", "PIZZERIA", "FRITTI", "PASTICCERIA"]
-CATEGORIE = [
-    "UOVA", "ANIMALI/VOLATILI", "PESCI/ANFIBI", "CROSTACEI", "MOLLUSCHI", 
-    "LEGUMI", "CEREALI", "VEGETALI", "FRUTTI", "FRUTTI SECCHI", "ERBE", 
-    "SPEZIE", "FIORI", "SEMI", "INSACCATI", "LATTICINI", "FORMAGGI ITALIA", 
-    "FORMAGGI MONDO", "PASTA", "PASTA RIPIENA", "CONDIMENTI", 
-    "SOTTOLIO/ACETO/SALAMOIA", "SALSE", "FARINE", "VARIE", "ALCOLICI"
-]
+PARTITE = ["ANTIPASTI", "PRIMI", "SECONDI", "PIZZERIA", "FRITTI", "PASTICCERIA", "ADMIN"]
+CATEGORIE = ["UOVA", "ANIMALI/VOLATILI", "PESCI/ANFIBI", "CROSTACEI", "MOLLUSCHI", "LEGUMI", "CEREALI", "VEGETALI", "FRUTTI", "FRUTTI SECCHI", "ERBE", "SPEZIE", "FIORI", "SEMI", "INSACCATI", "LATTICINI", "FORMAGGI ITALIA", "FORMAGGI MONDO", "PASTA", "PASTA RIPIENA", "CONDIMENTI", "SOTTOLIO/ACETO/SALAMOIA", "SALSE", "FARINE", "VARIE", "ALCOLICI"]
 UNITA = ["kg", "Lt", "Pz", "Cs", "Vs"]
 
-# Connessione al foglio Google
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- FUNZIONI ---
-def get_data():
+# --- FUNZIONI DATI ---
+def get_users():
+    return conn.read(worksheet="utenti", ttl="0")
+
+def get_orders():
     return conn.read(worksheet="ordini", ttl="0")
 
-# --- LOGIN SEMPLICE ---
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
+# --- GESTIONE SESSIONE ---
+if "user" not in st.session_state:
+    st.session_state.user = None
+if "role" not in st.session_state:
+    st.session_state.role = None
 
-if not st.session_state.authenticated:
-    pw = st.text_input("Password Cucina", type="password")
-    if pw == "Chef2026": # Puoi cambiare la password qui
-        st.session_state.authenticated = True
-        st.rerun()
+# --- AUTENTICAZIONE ---
+if st.session_state.user is None:
+    tab1, tab2 = st.tabs(["Login", "Registrati"])
+    
+    with tab1:
+        with st.form("login"):
+            u = st.text_input("Username").upper()
+            p = st.text_input("Password", type="password")
+            if st.form_submit_button("Entra"):
+                users_df = get_users()
+                user_data = users_df[(users_df['Username'] == u) & (users_df['Password'] == p)]
+                if not user_data.empty:
+                    st.session_state.user = u
+                    st.session_state.role = user_data.iloc[0]['Partita']
+                    st.rerun()
+                else:
+                    st.error("Credenziali errate")
+    
+    with tab2:
+        with st.form("register"):
+            new_u = st.text_input("Scegli Username").upper()
+            new_p = st.text_input("Scegli Password", type="password")
+            new_partita = st.selectbox("Seleziona la tua Partita", PARTITE[:-1]) # Esclude ADMIN dalla registrazione pubblica
+            if st.form_submit_button("Crea Account"):
+                users_df = get_users()
+                if new_u in users_df['Username'].values:
+                    st.error("Username già esistente")
+                else:
+                    new_user = pd.DataFrame([{"Username": new_u, "Password": new_p, "Partita": new_partita}])
+                    updated_users = pd.concat([users_df, new_user], ignore_index=True)
+                    conn.update(worksheet="utenti", data=updated_users)
+                    st.success("Account creato! Ora fai il Login.")
     st.stop()
 
-# --- NAVIGAZIONE ---
-menu = st.sidebar.radio("Menu", ["Fai un Ordine", "Storico Personale", "Dashboard Executive"])
+# --- APP DOPO IL LOGIN ---
+st.sidebar.title(f"Chef: {st.session_state.user}")
+st.sidebar.write(f"Partita: {st.session_state.role}")
 
-# --- 1. AREA ORDINE ---
-if menu == "Fai un Ordine":
-    st.header("🛒 Nuovo Ordine Interno")
-    
+if st.sidebar.button("Logout"):
+    st.session_state.user = None
+    st.rerun()
+
+menu_options = ["Nuovo Ordine", "Mio Storico"]
+if st.session_state.role == "ADMIN":
+    menu_options.append("DASHBOARD EXECUTIVE")
+
+menu = st.sidebar.radio("Navigazione", menu_options)
+
+# --- LOGICA PAGINE ---
+if menu == "Nuovo Ordine":
+    st.header("🛒 Invia Ordine Interno")
     with st.form("ordine_form", clear_on_submit=True):
+        cat = st.selectbox("Categoria", CATEGORIE)
+        prod = st.text_input("Prodotto")
         col1, col2 = st.columns(2)
-        with col1:
-            nome = st.text_input("Tuo Nome")
-            partita = st.selectbox("Tua Partita", PARTITE)
-        with col2:
-            categoria = st.selectbox("Categoria", CATEGORIE)
-            prodotto = st.text_input("Ingrediente (es. Pomodori)")
-            
-        col3, col4 = st.columns(2)
-        with col3:
-            qta = st.number_input("Quantità", min_value=0.1, step=0.1)
-        with col4:
-            misura = st.selectbox("Unità", UNITA)
-            
-        submit = st.form_submit_button("INVIA ORDINE")
+        qta = col1.number_input("Quantità", min_value=0.1)
+        uni = col2.selectbox("Unità", UNITA)
         
-        if submit:
-            if nome and prodotto:
-                # Carica dati esistenti
-                df_esistente = get_data()
-                # Crea nuovo record
-                nuovo_row = pd.DataFrame([{
-                    "Data": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                    "Chef": nome.upper(),
-                    "Partita": partita,
-                    "Categoria": categoria,
-                    "Prodotto": prodotto.upper(),
-                    "Quantita": qta,
-                    "Unita": misura,
-                    "Stato": "INVIATO"
-                }])
-                # Unisci e salva
-                updated_df = pd.concat([df_esistente, nuovo_row], ignore_index=True)
-                conn.update(worksheet="ordini", data=updated_df)
-                st.success(f"Ordine per {prodotto} inviato!")
-            else:
-                st.error("Inserisci nome e prodotto!")
+        if st.form_submit_button("Invia"):
+            df_ordini = get_orders()
+            nuovo = pd.DataFrame([{
+                "Data": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                "Chef": st.session_state.user,
+                "Partita": st.session_state.role,
+                "Categoria": cat,
+                "Prodotto": prod.upper(),
+                "Quantita": qta,
+                "Unita": uni,
+                "Stato": "INVIATO"
+            }])
+            conn.update(worksheet="ordini", data=pd.concat([df_ordini, nuovo], ignore_index=True))
+            st.success("Ordine registrato!")
 
-# --- 2. STORICO PERSONALE ---
-elif menu == "Storico Personale":
-    st.header("📋 I tuoi ordini di oggi")
-    nome_cerca = st.text_input("Inserisci il tuo nome per filtrare")
-    df = get_data()
-    if not df.empty and nome_cerca:
-        risultato = df[df['Chef'] == nome_cerca.upper()]
-        st.dataframe(risultato, use_container_width=True)
+elif menu == "Mio Storico":
+    st.header("📋 I tuoi ordini")
+    df = get_orders()
+    st.dataframe(df[df['Chef'] == st.session_state.user])
 
-# --- 3. DASHBOARD EXECUTIVE (IL TUO PANNELLO) ---
-elif menu == "Dashboard Executive":
-    st.header("👨‍🍳 Riepilogo Magazzino")
-    df = get_data()
-    
+elif menu == "DASHBOARD EXECUTIVE":
+    st.header("👨‍🍳 Pannello Chef Executive")
+    df = get_orders()
     if not df.empty:
-        # Trasformiamo la colonna Quantità in numero per sicurezza
         df['Quantita'] = pd.to_numeric(df['Quantita'])
-        
-        st.subheader("Totali da ordinare ai fornitori")
-        # Raggruppa per Categoria e Prodotto sommando le quantità
         riepilogo = df.groupby(['Categoria', 'Prodotto', 'Unita'])['Quantita'].sum().reset_index()
+        st.subheader("Riepilogo Totale Fabbisogno")
         st.dataframe(riepilogo, use_container_width=True)
         
-        if st.button("Pulisci Lista Ordini (Svuota Tutto)"):
-            header_only = pd.DataFrame(columns=df.columns)
-            conn.update(worksheet="ordini", data=header_only)
-            st.warning("Lista svuotata!")
+        if st.button("Svuota Ordini del Giorno"):
+            conn.update(worksheet="ordini", data=pd.DataFrame(columns=df.columns))
             st.rerun()
-    else:
-        st.info("Nessun ordine presente.")
