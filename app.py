@@ -35,8 +35,12 @@ if st.session_state.user is None:
             np = st.text_input("Password", type="password")
             npart = st.selectbox("Tua Partita", PARTITE[:-1])
             if st.form_submit_button("Crea Account"):
-                users = conn.read(worksheet="utenti", ttl="0")
-                new_user = pd.DataFrame([{"Username": nu, "Password": np, "Partita": npart}])
+try:
+    users = conn.read(worksheet="utenti", ttl=0)
+except Exception as e:
+    st.error(f"Errore di connessione al foglio: {e}")
+    st.stop()
+    new_user = pd.DataFrame([{"Username": nu, "Password": np, "Partita": npart}])
                 conn.update(worksheet="utenti", data=pd.concat([users, new_user], ignore_index=True))
                 st.success("Fatto! Ora fai il login.")
     st.stop()
